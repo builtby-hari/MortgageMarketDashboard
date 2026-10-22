@@ -29,8 +29,21 @@ def _quarter(d):
     return f"Q{(d.month - 1) // 3 + 1} {d.year}"
 
 
-def market_summary(s, dq=None, window_label=None, cv=None):
-    """Return a short factual paragraph from spread_stats `s`, delinquency_trend `dq` and curve_stats `cv`."""
+def _curve_sentence(leg, cv):
+    sentence = f"The 10-year minus {leg} Treasury spread was {cv['value'] * 100:+,.0f} bp"
+    m = _move(cv["yoy"], flat="unchanged") if cv["yoy"] is not None else None
+    if m:
+        sentence += f" ({m} over 52 weeks)" if m != "unchanged" else " (unchanged over 52 weeks)"
+    sentence += (f"; the curve was inverted on {cv['inverted_pct']:.0f}% of "
+                 f"{cv['hist_n']:,} daily readings since {cv['hist_start']:%Y}.")
+    if not cv["inverted_now"] and cv.get("last_inverted"):
+        d = cv["last_inverted"]
+        sentence = sentence[:-1] + f"; it last closed inverted on {d:%B} {d.day}, {d.year}."
+    return sentence
+
+
+def market_summary(s, dq=None, window_label=None, cv=None, cv3m=None):
+    """Return a short factual paragraph from spread_stats `s`, delinquency_trend `dq` and curve_stats `cv` (10Y-2Y) and `cv3m` (10Y-3M)."""
     parts = []
     wk = _move(s["mortgage30_wk_chg"], flat="unchanged")
     yr = _move(s["mortgage30_52w_chg"], flat="unchanged")
@@ -56,15 +69,14 @@ def market_summary(s, dq=None, window_label=None, cv=None):
     parts.append(f"That is {abs(z):.1f} standard deviations {rel} the average of {s['spread_mean'] * 100:,.0f} bp "
                  f"({s['hist_n']:,} weekly observations {window}), at the {_ordinal(s['spread_pctile'])} "
                  f"percentile of the range {s['spread_min'] * 100:,.0f} to {s['spread_max'] * 100:,.0f} bp.")
-    if cv:
-        slope = cv["value"] * 100
-        sentence = (f"The 10-year minus 2-year Treasury spread was {slope:+,.0f} bp")
-        m = _move(cv["yoy"], flat="unchanged") if cv["yoy"] is not None else None
-        if m:
-            sentence += f" ({m} over 52 weeks)" if m != "unchanged" else " (unchanged over 52 weeks)"
-        sentence += (f"; the curve was inverted on {cv['inverted_pct']:.0f}% of "
-                     f"{cv['hist_n']:,} daily readings since {cv['hist_start']:%Y}.")
-        parts.append(sentence)
+    if s.get("spread_z_5y") is not None and not window_label:
+        z5 = s["spread_z_5y"]
+        parts.append(f"Against the trailing five years alone it is {abs(z5):.1f} standard deviations "
+                     f"{'above' if z5 > 0 else 'below'} that window's average "
+                     f"(the {_ordinal(s['spread_pctile_5y'])} percentile).")
+    for leg, c in (("2-year", cv), ("3-month", cv3m)):
+        if c:
+            parts.append(_curve_sentence(leg, c))
     if dq:
         parts.append(f"The single-family mortgage delinquency rate was {dq['value']:.2f}% in {_quarter(dq['date'])}, "
                      f"{_pp(dq['qoq'])} on the quarter and {_pp(dq['yoy'])} on the year ({dq['direction']} trend), "

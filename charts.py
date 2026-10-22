@@ -13,7 +13,7 @@ import os
 import statistics
 import sys
 import textwrap
-from datetime import date, timedelta
+from datetime import timedelta
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 if ROOT not in sys.path:
@@ -304,7 +304,7 @@ def monthly_means(rows, since):
     return {k: statistics.mean(v) for k, v in acc.items()}
 
 
-def render_all(rows, stats, curve, sample_lines, chart_years=5):
+def render_all(rows, stats, curve, sample_lines, chart_years=5, curve3m=None):
     """Return {name: {"light": svg, "dark": svg}} for every README graphic."""
     last = rows[-1]["date"]
     recent = [r for r in rows if r["date"] >= last - timedelta(days=round(365.25 * chart_years))]
@@ -329,7 +329,11 @@ def render_all(rows, stats, curve, sample_lines, chart_years=5):
 
     def curve_chart(th):
         series = [("10Y Minus 2Y, Weekly", "navy", [(d, v * 100) for d, v in curve])]
-        return _line_chart(th, "10Y Minus 2Y Treasury Spread, Weekly (bp)", series, "Basis Points",
+        title = "10Y Minus 2Y Treasury Spread, Weekly (bp)"
+        if curve3m:
+            series.append(("10Y Minus 3M, Weekly", "teal", [(d, v * 100) for d, v in curve3m]))
+            title = "10Y Minus 2Y and 10Y Minus 3M Treasury Spreads, Weekly (bp)"
+        return _line_chart(th, title, series, "Basis Points",
                            shade=True, hline=(0.0, "0 bp = Flat"), yfmt="{:,.0f}",
                            extra_legend=[("box", "Inverted (Below Zero)", th["text"], 0.14)])
 
@@ -359,12 +363,13 @@ def write_all(rendered, out_dir):
 
 
 def load_inputs(data_dir="data"):
-    """Rows aligned weekly, the spread stats over all history, and the weekly 10Y-2Y curve. Cache only."""
+    """Aligned weekly rows, spread stats, and the weekly 10Y-2Y and 10Y-3M curves. Cache only."""
     data = load_all(data_dir, offline=True)
     rows = align(data["MORTGAGE30US"], data["MORTGAGE15US"], data["DGS10"])
     stats = spread_stats(rows)
     curve = weekly_last(curve_spread(data["DGS10"], data["DGS2"]))
-    return rows, stats, curve
+    curve3m = weekly_last(curve_spread(data["DGS10"], data["DGS3MO"]))
+    return rows, stats, curve, curve3m
 
 
 def sample_output_lines(width=90):
@@ -388,11 +393,11 @@ def main(argv=None):
     a = p.parse_args(argv)
     os.chdir(ROOT)
     try:
-        rows, stats, curve = load_inputs("data")
+        rows, stats, curve, curve3m = load_inputs("data")
     except (RuntimeError, FileNotFoundError) as exc:
         print(f"error: {exc}. Run python3 cli.py first to fill data/.", file=sys.stderr)
         return 1
-    rendered = render_all(rows, stats, curve, sample_output_lines(), a.chart_years)
+    rendered = render_all(rows, stats, curve, sample_output_lines(), a.chart_years, curve3m)
     for path in write_all(rendered, os.path.join(ROOT, a.out)):
         print("wrote " + os.path.relpath(path, ROOT))
     return 0

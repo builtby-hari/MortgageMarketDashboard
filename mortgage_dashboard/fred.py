@@ -14,14 +14,18 @@ SERIES = {
     "MORTGAGE15US": "15-year fixed mortgage rate, Freddie Mac PMMS (weekly, %)",
     "DGS10": "10-year Treasury constant maturity yield (daily, %)",
     "DGS2": "2-year Treasury constant maturity yield (daily, %)",
+    "DGS3MO": "3-month Treasury constant maturity yield (daily, %)",
     "DRSFRMACBS": "Delinquency rate on single-family residential mortgages (quarterly, %)",
 }
 
 
 def parse_fred_csv(text):
     """Parse FRED CSV text into a sorted list of (date, value); '.' and blanks are dropped."""
-    rd = csv.reader(io.StringIO(text.strip()))
-    header = next(rd, None)
+    text = text.strip().lstrip("\ufeff")
+    if text[:15].lower().startswith(("<!doctype", "<html")):
+        raise ValueError("FRED returned an HTML page instead of CSV (site maintenance or blocked request?)")
+    rd = csv.reader(io.StringIO(text))
+    header = next(rd, None)  # name is DATE or observation_date depending on FRED's era; not used
     if not header or len(header) < 2:
         raise ValueError("not a FRED CSV: missing header")
     out = []
@@ -32,6 +36,8 @@ def parse_fred_csv(text):
         if raw in ("", "."):
             continue
         out.append((date.fromisoformat(row[0].strip()), float(raw)))
+    if not out:
+        raise ValueError("FRED CSV has no observations")
     out.sort()
     return out
 
@@ -65,15 +71,16 @@ def load_series(series_id, data_dir="data", offline=False, fetch=download, log=p
             text = fetch(series_id)
             data = parse_fred_csv(text)          # validate before overwriting the cache
             os.makedirs(data_dir, exist_ok=True)
-            with open(path, "w", newline="") as fh:
+            with open(path + ".tmp", "w", newline="") as fh:   # replace atomically: no truncated cache on crash
                 fh.write(text)
+            os.replace(path + ".tmp", path)
             return data
         except (urllib.error.URLError, OSError, ValueError) as exc:
             if not os.path.exists(path):
                 raise RuntimeError(f"could not download {series_id} ({exc}) and no cache at {path}") from exc
             log(f"warning: download of {series_id} failed ({exc}); using cache {path}")
     elif not os.path.exists(path):
-        raise FileNotFoundError(f"--offline requested but no cached file at {path}")
+        raise FileNotFoundError(f"--offline requested but no cached file at {path}; run once without --offline to download it")
     with open(path, newline="") as fh:
         return parse_fred_csv(fh.read())
 

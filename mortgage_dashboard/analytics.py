@@ -4,6 +4,7 @@ import bisect
 import statistics
 from datetime import timedelta
 
+RECENT_YEARS = 5  # trailing window for the regime-aware spread z-score
 WINDOW_DAYS = 7  # the 7 calendar days ending on the mortgage observation date
 
 
@@ -59,10 +60,37 @@ def curve_stats(curve, window_years=None):
         hist = [x for x in curve if x[0] >= cutoff]
     chg, _ = change_over_days(curve, 364)
     vals = [x for _, x in hist]
+    neg = [x[0] for x in curve if x[1] < 0]
     return {"date": d, "value": v, "yoy": chg,
+            "inverted_now": v < 0, "last_inverted": neg[-1] if neg else None,
             "inverted_pct": 100.0 * sum(1 for x in vals if x < 0) / len(vals),
             "pctile": percentile_rank(v, vals),
             "hist_start": hist[0][0], "hist_n": len(vals)}
+
+
+def rate_volatility(series, days=63):
+    """Sample std dev, in bp, of day-over-day changes in the last `days` calendar days.
+
+    `series` is a sorted list of (date, pct). Changes are between consecutive observations
+    that both fall inside the window. Returns None with fewer than 5 changes.
+    """
+    if not series:
+        return None
+    cutoff = series[-1][0] - timedelta(days=days)
+    win = [v for d, v in series if d >= cutoff]
+    changes = [(win[i + 1] - win[i]) * 100 for i in range(len(win) - 1)]  # pairwise() needs 3.10+
+    if len(changes) < 5:
+        return None
+    return statistics.stdev(changes)
+
+
+def rolling_mean(series, n):
+    """Trailing mean over the last `n` observations of a sorted (date, value) list.
+
+    Starts at the n-th point, so every output value averages exactly n observations.
+    """
+    vals = [v for _, v in series]
+    return [(series[i][0], sum(vals[i - n + 1:i + 1]) / n) for i in range(n - 1, len(series))]
 
 
 def weekly_last(series):
@@ -135,7 +163,12 @@ def spread_stats(rows, window_years=None):
     yr, _ = change_over_days([(r["date"], r["mortgage30"]) for r in rows], 364)
     sp_yr, _ = change_over_days([(r["date"], r["spread"]) for r in rows], 364)
     t_yr, _ = change_over_days([(r["date"], r["dgs10_avg"]) for r in rows], 364)
+    # regime-aware view: always the trailing 5 years, whatever --window-years says
+    cut5 = last["date"] - timedelta(days=round(365.25 * RECENT_YEARS))
+    h5 = [r["spread"] for r in rows if r["date"] >= cut5]
+    z5 = zscore(last["spread"], h5) if len(h5) > 1 and statistics.pstdev(h5) > 0 else None
     return {
+        "spread_z_5y": z5, "spread_pctile_5y": percentile_rank(last["spread"], h5),
         "date": last["date"], "mortgage30": last["mortgage30"], "mortgage15": last["mortgage15"],
         "dgs10_avg": last["dgs10_avg"], "spread": last["spread"],
         "mortgage30_wk_chg": wk, "mortgage30_52w_chg": yr,

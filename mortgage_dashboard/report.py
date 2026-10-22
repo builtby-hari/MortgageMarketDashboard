@@ -4,7 +4,7 @@ import csv
 from datetime import timedelta
 from html import escape
 
-from .analytics import weekly_last
+from .analytics import rolling_mean, weekly_last
 from .charts import line_chart
 from .summary import market_summary
 
@@ -44,10 +44,11 @@ def write_aligned_csv(path, rows):
                         r["dgs10_obs"], f("spread", 4), f"{r['spread'] * 100:.1f}", f("delinquency", 2)])
 
 
-def charts_for(rows, delinq, stats, chart_years=5, standalone=False, curve=None):
+def charts_for(rows, delinq, stats, chart_years=5, standalone=False, curve=None, curve3m=None):
     """Return {name: svg} for the dashboard charts (a fourth, the curve slope, when `curve` is given)."""
     last = rows[-1]["date"]
     recent = [r for r in rows if r["date"] >= last - timedelta(days=round(365.25 * chart_years))]
+    spread = [(r["date"], r["spread"]) for r in rows]
     out = {
         "rates": line_chart(
             f"Mortgage rates vs 10Y Treasury, last {chart_years} years (%)",
@@ -57,7 +58,7 @@ def charts_for(rows, delinq, stats, chart_years=5, standalone=False, curve=None)
             "Percent", standalone=standalone),
         "spread": line_chart(
             "30Y mortgage - 10Y Treasury spread (percentage points)",
-            [("Spread", "c1", [(r["date"], r["spread"]) for r in rows])],
+            [("Spread", "c1", spread)] + ([("52-week average", "c2", rolling_mean(spread, 52))] if len(spread) >= 52 else []),
             "Percentage points",
             band=(stats["spread_mean"] - stats["spread_stdev"], stats["spread_mean"] + stats["spread_stdev"]),
             hline=(stats["spread_mean"], f"mean {stats['spread_mean']*100:,.0f} bp (band = +/-1 sd)"),
@@ -65,10 +66,13 @@ def charts_for(rows, delinq, stats, chart_years=5, standalone=False, curve=None)
             yfmt="{:.1f}", standalone=standalone),
     }
     if curve:
-        weekly = weekly_last(curve)
+        lines = [("10Y minus 2Y", "c3", weekly_last(curve))]
+        if curve3m:
+            lines.append(("10Y minus 3M", "c2", weekly_last(curve3m)))
         out["curve"] = line_chart(
-            "10Y - 2Y Treasury spread (percentage points, weekly)",
-            [("10Y minus 2Y", "c3", weekly)], "Percentage points",
+            "10Y - 2Y and 10Y - 3M Treasury spreads (percentage points, weekly)" if curve3m
+            else "10Y - 2Y Treasury spread (percentage points, weekly)",
+            lines, "Percentage points",
             hline=(0.0, "inverted below zero"), yfmt="{:.1f}", standalone=standalone)
     if delinq:
         out["delinquency"] = line_chart(
@@ -78,9 +82,10 @@ def charts_for(rows, delinq, stats, chart_years=5, standalone=False, curve=None)
 
 
 def build_html(rows, delinq, stats, dq, window_label=None, chart_years=5, generated=None,
-               curve=None, cv=None):
-    svgs = charts_for(rows, delinq, stats, chart_years, curve=curve if cv else None)
-    summary = market_summary(stats, dq, window_label, cv)
+               curve=None, cv=None, curve3m=None, cv3m=None, vol=None):
+    svgs = charts_for(rows, delinq, stats, chart_years, curve=curve if cv else None,
+                      curve3m=curve3m if cv3m else None)
+    summary = market_summary(stats, dq, window_label, cv, cv3m)
     kp = [("30Y mortgage", f"{stats['mortgage30']:.2f}%", f"{_signed(stats['mortgage30_52w_chg'])} vs 52 wks"),
           ("10Y Treasury (wk avg)", f"{stats['dgs10_avg']:.2f}%", f"{_signed(stats['dgs10_52w_chg'])} vs 52 wks"),
           ("Spread", f"{stats['spread']*100:,.0f} bp", f"{_signed(stats['spread_52w_chg'])} vs 52 wks"),
@@ -88,6 +93,12 @@ def build_html(rows, delinq, stats, dq, window_label=None, chart_years=5, genera
     if cv:
         kp.append(("10Y - 2Y curve", f"{cv['value']*100:+,.0f} bp",
                    f"{_signed(cv['yoy'])} vs 52 wks" if cv["yoy"] is not None else f"inverted {cv['inverted_pct']:.0f}% of days"))
+    if cv3m:
+        kp.append(("10Y - 3M curve", f"{cv3m['value']*100:+,.0f} bp",
+                   f"{_signed(cv3m['yoy'])} vs 52 wks" if cv3m["yoy"] is not None
+                   else f"inverted {cv3m['inverted_pct']:.0f}% of days"))
+    if vol is not None:
+        kp.append(("10Y volatility", f"{vol:.1f} bp", "daily-change std dev, 63 days"))
     if dq:
         kp.append(("Delinquency rate", f"{dq['value']:.2f}%", f"{dq['direction']}, {dq['yoy']:+.2f} pp YoY"))
     tiles = "".join(f'<div class="card kpi"><div class="l">{escape(l)}</div><div class="v">{escape(v)}</div>'

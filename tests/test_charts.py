@@ -25,15 +25,16 @@ def fx(name):
 def fixture_inputs():
     d10, d2 = fx("DGS10"), fx("DGS2")
     rows = align(fx("MORTGAGE30US"), fx("MORTGAGE15US"), d10)
-    return rows, spread_stats(rows), weekly_last(curve_spread(d10, d2))
+    return rows, spread_stats(rows), weekly_last(curve_spread(d10, d2)), weekly_last(curve_spread(d10, fx("DGS3MO")))
 
 
 class TestCharts(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        rows, stats, curve = fixture_inputs()
-        cls.rows, cls.stats, cls.curve = rows, stats, curve
-        cls.rendered = charts.render_all(rows, stats, curve, ["$ python3 cli.py --offline", "one line"])
+        rows, stats, curve, curve3m = fixture_inputs()
+        cls.rows, cls.stats, cls.curve, cls.curve3m = rows, stats, curve, curve3m
+        cls.rendered = charts.render_all(rows, stats, curve, ["$ python3 cli.py --offline", "one line"],
+                                         curve3m=curve3m)
 
     def test_expected_graphics(self):
         self.assertEqual(set(self.rendered), NAMES)
@@ -73,15 +74,30 @@ class TestCharts(unittest.TestCase):
         inverted = any(v < 0 for _, v in self.curve)
         self.assertEqual("<polygon" in svg, inverted)
 
+    def test_curve_chart_has_both_series_and_legend_in_both_themes(self):
+        self.assertTrue(self.curve3m)
+        for key, navy, teal in (("light", "#1f3a5f", "#14b8a6"), ("dark", "#60a5fa", "#2dd4bf")):
+            svg = self.rendered["curve"][key]
+            root = ET.fromstring(svg)
+            lines = [e for e in root.iter() if e.tag.endswith("polyline")]
+            self.assertEqual({e.get("stroke") for e in lines}, {navy, teal})
+            self.assertIn("10Y Minus 3M, Weekly", svg)
+            self.assertIn("10Y Minus 2Y, Weekly", svg)
+
+    def test_curve_chart_without_3m_has_one_series(self):
+        svg = charts.render_all(self.rows, self.stats, self.curve, [""])["curve"]["light"]
+        self.assertEqual(svg.count("<polyline"), 1)
+        self.assertNotIn("10Y Minus 3M", svg)
+
 
 @unittest.skipUnless(importlib.util.find_spec("matplotlib"), "matplotlib not installed")
 class TestMatplotlibPlots(unittest.TestCase):
     def test_png_files_written(self):
         import plots_mpl
-        rows, stats, curve = fixture_inputs()
+        rows, stats, curve, curve3m = fixture_inputs()
         out = tempfile.mkdtemp()
         try:
-            paths = plots_mpl.make_pngs(out, rows, stats, curve)
+            paths = plots_mpl.make_pngs(out, rows, stats, curve, curve3m=curve3m)
             self.assertEqual(len(paths), 5)
             for p in paths:
                 with open(p, "rb") as fh:

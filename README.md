@@ -5,11 +5,11 @@
   </picture>
 </p>
 
-![Python](https://img.shields.io/badge/python-3.9%2B-1f3a5f) ![Tests](https://img.shields.io/badge/tests-45%20passing-14b8a6) ![Dependencies](https://img.shields.io/badge/dependencies-none-1f3a5f) ![License](https://img.shields.io/badge/license-MIT-14b8a6)
+![Python](https://img.shields.io/badge/python-3.9%2B-1f3a5f) ![Dependencies](https://img.shields.io/badge/dependencies-none-1f3a5f) ![License](https://img.shields.io/badge/license-MIT-14b8a6)
 
 A small, dependency-free Python tool that pulls public FRED series, aligns weekly
 mortgage rates to the same week's 10-year Treasury yield, measures the
-mortgage-Treasury spread and the 10Y-2Y curve slope against their own history, and
+mortgage-Treasury spread and the 10Y-2Y and 10Y-3M curve slopes against their own history, and
 writes a self-contained HTML report, a CSV of the aligned data, and a short
 auto-written market summary. Standard library only (Python 3.9+). No API key and no
 `pip install`.
@@ -22,11 +22,14 @@ auto-written market summary. Standard library only (Python 3.9+). No API key and
 - [Quickstart](#quickstart)
 - [Charts](#charts)
 - [Sample Output](#sample-output)
+- [Morning Note](#morning-note)
 - [Methodology](#methodology)
 - [Optional: Matplotlib Plots](#optional-matplotlib-plots)
 - [Skills Shown](#skills-shown)
 - [Limitations](#limitations)
-- [Project Layout, Data and Tests](#project-layout-data-and-tests)
+- [Next Steps](#next-steps)
+- [Project Layout and Data](#project-layout-and-data)
+- [License](#license)
 - [Glossary](#glossary)
 
 ## Hero Chart
@@ -123,6 +126,10 @@ light/dark setting, and uses no external JS, CSS, fonts or images. A snapshot is
 <details>
 <summary>Full Output</summary>
 
+The output below was captured before the five-year z-score, last-inverted and 10Y-3M
+clauses were added to the summary (FRED was down for maintenance when they were added,
+so it could not be refreshed); re-run `python3 cli.py` to see them with current data.
+
 ```
 For the week of October 15, 2026, the 30-year fixed mortgage rate was 7.40% (unchanged on the week, up 113 bp over 52 weeks); the 15-year was 6.71%. The 10-year Treasury averaged 5.19% over the same week, so the mortgage-Treasury spread was 222 bp (down 3 bp over 52 weeks). That is 0.9 standard deviations above the average of 176 bp (2,899 weekly observations since 1971), at the 85th percentile of the range 4 to 535 bp. The 10-year minus 2-year Treasury spread was +38 bp (down 16 bp over 52 weeks); the curve was inverted on 16% of 12,592 daily readings since 1976. The single-family mortgage delinquency rate was 1.86% in Q2 2026, down 0.02 pp on the quarter and up 0.08 pp on the year (flat trend), at the 20th percentile of quarterly readings since 1991.
 
@@ -134,6 +141,38 @@ Wrote out/aligned.csv
 </details>
 
 `out/aligned.csv` columns: `date, mortgage30, mortgage15, dgs10_avg, dgs10_obs, spread, spread_bp, delinquency`.
+
+## Morning Note
+
+```bash
+python3 cli.py --offline --note out/note.html
+```
+
+Writes a one-page desk-style note next to the normal report. It is a single HTML file with
+no external scripts, styles or links, and print CSS set to one US letter page (use the
+browser's Print to PDF). From top to bottom: headline numbers (30-year rate, 10-year
+Treasury weekly average, spread with z-score and percentile, each with week and 52-week
+change), the curve table (10Y-2Y and 10Y-3M with inversion status), a row of small
+52-week sparklines, a What Moved list, a Read Across box, and a footer with the data
+source, the as-of date and a not-advice line. A warning appears under the title when the
+latest observation is more than 14 days old. All text is filled from computed numbers by
+the rules below; none of it is written by hand.
+
+| Rule | Fires When | Output |
+|---|---|---|
+| W1 Largest Moves | always, top three non-zero | the three largest absolute weekly changes among the 30-year rate, 10-year weekly average, spread and both curve slopes |
+| W2 Spread Band | spread z-score is above +1 or below -1 | spread level against its average, in standard deviations |
+| W3 Curve Sign Change | a curve slope has the opposite sign a week or 52 weeks earlier | the old and new slope in bp |
+| R1 Spread vs 5 Years | spread z-score against the trailing five years is +1 or higher (or -1 or lower) | FIG: originations face wider (or tighter) primary-secondary spreads |
+| R2 Inverted Curve | 10Y-2Y or 10Y-3M is below zero | FIG: funding costs sit above long asset yields, so net interest margin faces pressure |
+| R3 Upward Curve | both slopes are above zero | FIG: term lending earns a positive carry over short funding |
+| R4 Mortgage Rate Level | 30-year rate moved 25 bp or more over 52 weeks | FIG: refinancing incentive is lower (up) or higher (down) |
+| R5 Benchmark Move | 10-year weekly average moved 10 bp or more on the week | DCM: fixed-rate issuers face a higher or lower all-in coupon at the same spread |
+| R6 Delinquency Trend | bank mortgage delinquency 4-quarter change beyond 0.10 pp | FIG: provisioning needs face upward (rising) or downward (falling) pressure |
+
+The Read Across lines are conditional facts ("with X, Y follows"), not forecasts. The
+note is built from the same cached FRED data as the report, so run it with `--offline`
+or let `cli.py` download first; it does not fabricate values if a download fails.
 
 ## Methodology
 
@@ -147,7 +186,7 @@ reproducible view of those inputs from public data, and it pairs with the MBS ca
 flow model (prepayment speed depends on the gap between a pool's coupon and the
 current mortgage rate).
 
-The core formulas, with $d$ the mortgage observation date:
+The core formulas, with $d$ denoting the mortgage observation date:
 
 $$T(d)=\frac{1}{n_d}\sum_{t\in[d-6,\,d]} \mathrm{DGS10}_t \qquad S(d)=M_{30}(d)-T(d)$$
 
@@ -164,6 +203,11 @@ $$\mathrm{Curve}(d)=10Y(d)-2Y(d) \qquad \Delta_{52}X(d)=X(d)-X(d-364)$$
 | Percentile | mid-rank: `(#below + 0.5 * #equal) / N * 100` |
 | Curve slope | `10Y - 2Y` Treasury yield in basis points, on dates where both have a print (an inner join, so a holiday that affects one leg drops out). Reported with its 52-week change and the share of daily readings below zero (inverted) over the history window |
 | Delinquency trend | latest level, change vs prior quarter and vs 4 quarters earlier; "rising" or "falling" if the 4-quarter change exceeds +/-0.10 pp, else "flat"; percentile versus all quarterly readings |
+| Five-year z-score | the same z-score and percentile against the trailing 5 years only, shown next to the full-history one in the summary sentence only (omitted when `--window-years` is set; not in the HTML tiles or CSV). The post-2008 average spread is a commonly quoted benchmark, about 170 bp per [First American](https://blog.firstam.com/economics/mind-the-gap-between-mortgage-rates-and-the-10-year-treasury-yield), so a 1971-onward mean mixes regimes |
+| 10Y-3M slope | `10Y - 3M` (FRED DGS3MO) built the same way as the 10Y-2Y slope, with the same inversion share and last-inverted date. The New York Fed's recession model uses this spread. |
+| 10Y volatility | sample standard deviation of day-over-day DGS10 changes over the last 63 calendar days, in bp (CLI line and HTML tile) |
+| Last inverted | most recent date the 10Y-2Y curve closed below zero, shown when the curve is not inverted today |
+| Stale-data warning | the CLI warns on stderr when the latest 30-year or 10-year observation is more than 14 days old (for example an old `--offline` cache) |
 
 The summary paragraph is filled from these numbers by a template, so it states
 levels, changes and percentiles and makes no causal claims.
@@ -171,7 +215,7 @@ levels, changes and percentiles and makes no causal claims.
 ## Optional: Matplotlib Plots
 
 The core uses only the standard library, and everything above is drawn by `charts.py`
-with no extra packages. For larger matplotlib versions of the main charts, run:
+with no extra packages. For full-size matplotlib versions of the main charts, run:
 
 ```bash
 pip install -r requirements-extra.txt
@@ -193,7 +237,7 @@ Python · Fixed income · Time series · Data visualization · Public data (FRED
 - The spread is mortgage rate minus the 10Y yield, not an OAS or a
   current-coupon MBS spread; it mixes the primary-secondary spread, the MBS
   spread, and the gap between the 10Y and the average mortgage life.
-- A full-history z-score spans very different regimes (1970s-80s inflation, GSE
+- A full-history z-score spans very different regimes (1970s to 80s inflation, GSE
   and Fed MBS-purchase eras), so use `--window-years` for a regime-aware view.
   The z-score is descriptive; spread changes are autocorrelated and not normal.
 - Delinquency is matched by quarter label, not release date, so the attached
@@ -214,12 +258,12 @@ Python · Fixed income · Time series · Data visualization · Public data (FRED
 
 1. Add a current-coupon agency MBS yield or a swap-based spread to separate the
    primary-secondary spread from the MBS spread.
-2. Add rate volatility (e.g., realized 10Y vol) and regress the spread on it.
+2. Regress the spread on the 10Y rate volatility the tool already computes.
 3. Join the spread to the refinancing incentive (pool WAC minus mortgage rate)
    to link it to prepayment speeds in the MBS cash flow model.
 4. Rolling or regime-based z-scores, and an email- or cron-friendly run mode.
 
-## Project Layout, Data and Tests
+## Project Layout and Data
 
 ```
 mortgage_dashboard/fred.py        download, cache, parse FRED CSV
@@ -227,23 +271,13 @@ mortgage_dashboard/analytics.py   alignment, spread, curve slope, changes, z-sco
 mortgage_dashboard/summary.py     template-based market summary
 mortgage_dashboard/charts.py      line charts for the HTML report (light and dark)
 mortgage_dashboard/report.py      HTML report and CSV writer
+mortgage_dashboard/note.py        one-page Morning Note and its rules
 cli.py                            command line interface
 charts.py                         README charts as SVG, light and dark (stdlib only)
 plots_mpl.py                      optional matplotlib PNGs (needs requirements-extra.txt)
 tests/                            unittest suite and fixture CSVs
 docs/                             README chart SVGs (light and -dark), sample report, docs/mpl PNGs
 ```
-
-**Tests.** 45 tests, no network (fixtures in `tests/fixtures`): FRED parsing (`.` and
-blank values, both header styles), weekly alignment (7-day window, holiday gaps, weeks
-with no Treasury data skipped, 15Y join), spread math, 52-week changes, z-score and
-percentile on known values, delinquency trend, summary text, cache and `--offline`
-behavior (including a failed or garbage download not overwriting the cache), CSV
-output, a check that the HTML has no external resources, the curve slope on a fixture
-with hand-derived answers (an inner join, long-minus-short, 52-week change, inverted
-share, window trimming, weekly down-sampling), and the README charts (each SVG is
-generated and parses as XML, light and dark palettes, the banner size, and the
-matplotlib PNGs when matplotlib is installed).
 
 **Data.** All series come from the FRED no-key CSV endpoint
 `https://fred.stlouisfed.org/graph/fredgraph.csv?id=<SERIES>`.
@@ -254,6 +288,7 @@ matplotlib PNGs when matplotlib is installed).
 | `MORTGAGE15US` | Freddie Mac 15-year fixed rate (PMMS) | weekly (Thursday) |
 | `DGS10` | 10-year Treasury constant maturity yield | daily (business days) |
 | `DGS2` | 2-year Treasury constant maturity yield | daily (business days) |
+| `DGS3MO` | 3-month Treasury constant maturity yield | daily (business days) |
 | `DRSFRMACBS` | Delinquency rate on single-family residential mortgages, all commercial banks | quarterly |
 
 Downloads are cached in `data/`; `--offline` uses only those cached files.

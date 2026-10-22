@@ -20,7 +20,7 @@ NAVY, TEAL, GRID, TEXT = "#1f3a5f", "#14b8a6", "#cbd5e1", "#334155"
 THEME_LO = "#e2e8f0"
 
 
-def make_pngs(out_dir, rows, stats, curve, chart_years=5):
+def make_pngs(out_dir, rows, stats, curve, chart_years=5, curve3m=None):
     """Draw the five main charts with matplotlib and return the written paths."""
     import matplotlib
     matplotlib.use("Agg")
@@ -73,7 +73,12 @@ def make_pngs(out_dir, rows, stats, curve, chart_years=5):
     ax.fill_between(cd, cv, 0, where=[v < 0 for v in cv], color=TEXT, alpha=0.18, lw=0,
                     interpolate=True, label="Inverted (Below Zero)")
     ax.axhline(0, color=TEXT, lw=1)
-    ax.set_title("10Y Minus 2Y Treasury Spread, Weekly (bp)")
+    title = "10Y Minus 2Y Treasury Spread, Weekly (bp)"
+    if curve3m:
+        ax.plot([d for d, _ in curve3m], [v * 100 for _, v in curve3m], color=TEAL, lw=1.1,
+                label="10Y Minus 3M, Weekly")
+        title = "10Y Minus 2Y and 10Y Minus 3M Treasury Spreads, Weekly (bp)"
+    ax.set_title(title)
     ax.set_ylabel("Basis Points")
     ax.legend(loc="upper left")
     save(fig, "curve")
@@ -118,8 +123,8 @@ def main():
         print("matplotlib is not installed. It is optional: pip install -r requirements-extra.txt")
         print("The core charts (python3 charts.py) need nothing extra.")
         return 0
-    rows, stats, curve = charts.load_inputs("data")
-    for path in make_pngs(os.path.join(ROOT, "docs", "mpl"), rows, stats, curve):
+    rows, stats, curve, curve3m = charts.load_inputs("data")
+    for path in make_pngs(os.path.join(ROOT, "docs", "mpl"), rows, stats, curve, curve3m=curve3m):
         print("wrote " + os.path.relpath(path, ROOT))
     return 0
 

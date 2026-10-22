@@ -9,7 +9,8 @@ from datetime import date
 from mortgage_dashboard import (parse_fred_csv, load_series, align, attach_delinquency,
                                 change_over_days, zscore, percentile_rank, spread_stats,
                                 delinquency_trend, market_summary, build_html,
-                                write_aligned_csv, curve_spread, curve_stats, weekly_last)
+                                write_aligned_csv, curve_spread, curve_stats, weekly_last,
+                                rate_volatility, rolling_mean)
 
 FIX = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
 
@@ -36,6 +37,15 @@ class TestParse(unittest.TestCase):
     def test_bad_input(self):
         with self.assertRaises(ValueError):
             parse_fred_csv("")
+
+    def test_maintenance_html_page_gets_clear_error(self):
+        # FRED served this (HTTP 200) during maintenance
+        page = "<!doctype html>\n<html lang=\"en\"><head><title>Site Maintenance | St. Louis Fed<</title>"
+        with self.assertRaisesRegex(ValueError, "HTML page"):
+            parse_fred_csv(page)
+
+    def test_utf8_bom_is_tolerated(self):
+        self.assertEqual(parse_fred_csv("\ufeffDATE,X\n2024-01-02,1.5\n"), [(date(2024, 1, 2), 1.5)])
 
 
 class TestAlign(unittest.TestCase):
@@ -110,6 +120,14 @@ class TestStats(unittest.TestCase):
         self.assertEqual(s["hist_n"], 8)
         self.assertLess(s["spread_z"], 0)
 
+    def test_five_year_view_ignores_window_arg(self):
+        rows = align(fx("MORTGAGE30US"), fx("MORTGAGE15US"), fx("DGS10"))
+        s = spread_stats(rows, window_years=0.5)
+        full = spread_stats(rows)
+        self.assertAlmostEqual(s["spread_z_5y"], full["spread_z_5y"])
+        self.assertAlmostEqual(s["spread_z_5y"], zscore(2.32, [r["spread"] for r in rows]))  # all 8 rows within 5y
+        self.assertAlmostEqual(s["spread_pctile_5y"], full["spread_pctile"])
+
     def test_window_limits_history(self):
         rows = align(fx("MORTGAGE30US"), fx("MORTGAGE15US"), fx("DGS10"))
         self.assertEqual(spread_stats(rows, window_years=0.5)["hist_n"], 7)
@@ -157,6 +175,16 @@ class TestCurve(unittest.TestCase):
         self.assertEqual(cv["hist_n"], 40)
         self.assertEqual(cv["hist_start"], date(2023, 10, 5))
 
+    def test_last_inverted_date(self):
+        cv = curve_stats(self.curve)
+        self.assertFalse(cv["inverted_now"])
+        self.assertEqual(cv["last_inverted"], date(2024, 9, 13))
+        # trimming the series to a never-inverted stretch leaves no inversion date
+        cv2 = curve_stats([x for x in self.curve if x[0] >= date(2024, 10, 1)])
+        self.assertIsNone(cv2["last_inverted"])
+        cv3 = curve_stats([(date(2024, 1, 1), 0.5), (date(2024, 1, 2), -0.1)])
+        self.assertTrue(cv3["inverted_now"])
+
     def test_window_trims_history(self):
         cv = curve_stats(self.curve, window_years=0.5)
         self.assertEqual(cv["hist_start"], date(2024, 8, 23))
@@ -173,6 +201,85 @@ class TestCurve(unittest.TestCase):
         series = [(date(2024, 10, 7), 1.0), (date(2024, 10, 8), 2.0), (date(2024, 10, 11), 3.0),
                   (date(2024, 10, 14), 4.0)]
         self.assertEqual(weekly_last(series), [(date(2024, 10, 11), 3.0), (date(2024, 10, 14), 4.0)])
+
+
+class TestCurve3M(unittest.TestCase):
+    def setUp(self):
+        self.curve = curve_spread(fx("DGS10"), fx("DGS3MO"))
+        self.by = dict(self.curve)
+
+    def test_inner_join_drops_dates_missing_from_either_leg(self):
+        self.assertNotIn(date(2024, 9, 17), self.by)   # absent from the 3M file
+        self.assertNotIn(date(2024, 9, 3), self.by)    # '.' in the 3M file
+        self.assertEqual(len(self.curve), 39)
+
+    def test_spread_is_long_minus_short(self):
+        self.assertAlmostEqual(self.by[date(2023, 10, 5)], 4.60 - 5.40)
+        self.assertAlmostEqual(self.by[date(2024, 10, 11)], 4.10 - 3.90)
+
+    def test_stats_and_last_inverted(self):
+        cv = curve_stats(self.curve)
+        self.assertAlmostEqual(cv["value"], 0.20)
+        self.assertAlmostEqual(cv["yoy"], 0.20 - (-0.60))   # vs 2023-10-12
+        self.assertAlmostEqual(cv["inverted_pct"], 100 * 20 / 39)
+        self.assertEqual(cv["last_inverted"], date(2024, 10, 3))
+        self.assertFalse(cv["inverted_now"])
+
+    def test_summary_sentence_only_when_given(self):
+        rows = align(fx("MORTGAGE30US"), fx("MORTGAGE15US"), fx("DGS10"))
+        stats = spread_stats(rows)
+        cv3 = curve_stats(self.curve)
+        t = market_summary(stats, None, None, None, cv3)
+        self.assertIn("10-year minus 3-month Treasury spread was +20 bp", t)
+        self.assertIn("it last closed inverted on October 3, 2024", t)
+        self.assertNotIn("3-month", market_summary(stats, None))
+
+    def test_html_tile_chart_and_volatility(self):
+        rows = align(fx("MORTGAGE30US"), fx("MORTGAGE15US"), fx("DGS10"))
+        stats = spread_stats(rows)
+        c2 = curve_spread(fx("DGS10"), fx("DGS2"))
+        kw = dict(curve=c2, cv=curve_stats(c2), curve3m=self.curve, cv3m=curve_stats(self.curve))
+        html = build_html(rows, [], stats, None, **kw, vol=12.3)
+        self.assertIn("10Y - 3M curve", html)
+        self.assertIn("10Y minus 3M", html)
+        self.assertIn("10Y volatility", html)
+        self.assertIn("12.3 bp", html)
+        self.assertNotIn("10Y volatility", build_html(rows, [], stats, None, **kw))
+
+
+class TestRollingMean(unittest.TestCase):
+    def test_trailing_window_values(self):
+        s = [(date(2024, 1, i), float(i)) for i in range(1, 6)]
+        out = rolling_mean(s, 3)
+        self.assertEqual([v for _, v in out], [2.0, 3.0, 4.0])
+        self.assertEqual(out[0][0], date(2024, 1, 3))
+
+    def test_window_longer_than_series_gives_empty(self):
+        self.assertEqual(rolling_mean([(date(2024, 1, 1), 1.0)], 3), [])
+
+
+class TestRateVol(unittest.TestCase):
+    def _daily(self, values, start=date(2024, 6, 1)):
+        return [(date.fromordinal(start.toordinal() + i), v) for i, v in enumerate(values)]
+
+    def test_constant_series_has_zero_vol(self):
+        self.assertEqual(rate_volatility(self._daily([4.0] * 10)), 0.0)
+
+    def test_alternating_moves_match_hand_value(self):
+        # six changes of +10, -10, ... bp: mean 0, sample variance 600 / 5 = 120
+        vals = [4.00, 4.10] * 3 + [4.00]
+        self.assertAlmostEqual(rate_volatility(self._daily(vals)), 120 ** 0.5)
+
+    def test_too_few_changes_returns_none(self):
+        self.assertIsNone(rate_volatility(self._daily([4.0, 4.1, 4.0, 4.1, 4.0])))  # 4 changes
+        self.assertIsNone(rate_volatility([]))
+
+    def test_window_excludes_old_moves(self):
+        # a 400 bp jump 60+ days before the last print must not count
+        old = self._daily([1.0, 5.0], start=date(2024, 1, 1))
+        recent = self._daily([4.0] * 7, start=date(2024, 6, 1))
+        self.assertEqual(rate_volatility(old + recent, days=63), 0.0)
+        self.assertGreater(rate_volatility(old + recent, days=400), 0.0)
 
 
 class TestSummary(unittest.TestCase):
@@ -209,6 +316,11 @@ class TestSummary(unittest.TestCase):
         t = market_summary(self.stats, self.dq, None, cv)
         self.assertIn("10-year minus 2-year Treasury spread was +20 bp (up 50 bp over 52 weeks)", t)
         self.assertIn("inverted on 28% of 40 daily readings since 2023", t)
+        self.assertIn("it last closed inverted on September 13, 2024", t)
+
+    def test_five_year_sentence_only_for_full_history(self):
+        self.assertIn("trailing five years alone", self.text)
+        self.assertNotIn("trailing five years alone", market_summary(self.stats, self.dq, "in the trailing 2 years"))
 
 
 class TestIOAndReport(unittest.TestCase):
@@ -294,6 +406,56 @@ class TestIOAndReport(unittest.TestCase):
     def test_default_series_include_two_year(self):
         from mortgage_dashboard import SERIES
         self.assertIn("DGS2", SERIES)
+        self.assertIn("DGS3MO", SERIES)
+
+
+class TestCliStaleWarning(unittest.TestCase):
+    def test_old_cache_warns_on_stderr_but_still_runs(self):
+        import contextlib, io
+        import cli
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        for sid in ("MORTGAGE30US", "MORTGAGE15US", "DGS10", "DGS2", "DGS3MO", "DRSFRMACBS"):
+            shutil.copy(os.path.join(FIX, sid + ".csv"), tmp)
+        err, out = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
+            rc = cli.main(["--offline", "--data-dir", tmp, "--out", os.path.join(tmp, "out")])
+        self.assertEqual(rc, 0)
+        self.assertIn("days old; data may be stale", err.getvalue())
+        self.assertTrue(os.path.exists(os.path.join(tmp, "out", "report.html")))
+
+    def test_bad_window_years_is_a_clean_error(self):
+        import contextlib, io, cli
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                cli.main(["--window-years", "0"])
+
+    def test_empty_cached_series_is_a_clean_error(self):
+        import contextlib, io, cli
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        for sid in ("MORTGAGE30US", "MORTGAGE15US", "DGS10", "DGS2", "DGS3MO", "DRSFRMACBS"):
+            shutil.copy(os.path.join(FIX, sid + ".csv"), tmp)
+        with open(os.path.join(tmp, "DGS10.csv"), "w") as fh:
+            fh.write("observation_date,DGS10\n")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = cli.main(["--offline", "--data-dir", tmp, "--out", os.path.join(tmp, "o")])
+        self.assertEqual(rc, 1)
+        self.assertIn("no observations", err.getvalue())
+
+    def test_offline_with_old_cache_missing_dgs3mo_gives_clear_error(self):
+        import contextlib, io, cli
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        for sid in ("MORTGAGE30US", "MORTGAGE15US", "DGS10", "DGS2", "DRSFRMACBS"):
+            shutil.copy(os.path.join(FIX, sid + ".csv"), tmp)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            rc = cli.main(["--offline", "--data-dir", tmp, "--out", os.path.join(tmp, "o")])
+        self.assertEqual(rc, 1)
+        self.assertIn("DGS3MO.csv", err.getvalue())
+        self.assertIn("run once without --offline", err.getvalue())
 
 
 if __name__ == "__main__":
