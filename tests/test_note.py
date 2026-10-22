@@ -90,9 +90,9 @@ class TestRules(unittest.TestCase):
         return " ".join(t for _, t in note.read_across(a["stats"], a["cv"], a["cv3m"], a["dq"], a["wk10"]))
 
     def test_read_across_rules(self):
-        self.assertIn("originations face wider primary-secondary spreads", self.tags(stats=stats(spread_z_5y=1.4)))
-        self.assertIn("tighter primary-secondary", self.tags(stats=stats(spread_z_5y=-1.4)))
-        self.assertNotIn("primary-secondary", self.tags(stats=stats(spread_z_5y=0.5)))
+        self.assertIn("mortgage rates sit wide of Treasuries", self.tags(stats=stats(spread_z_5y=1.4)))
+        self.assertIn("mortgage rates sit tight to Treasuries", self.tags(stats=stats(spread_z_5y=-1.4)))
+        self.assertNotIn("to Treasuries", self.tags(stats=stats(spread_z_5y=0.5)))
         self.assertIn("net interest margin faces pressure", self.tags(cv=cvx(-0.2)))
         self.assertIn("positive carry", self.tags())
         self.assertIn("refinancing incentive is lower", self.tags(stats=stats(mortgage30_52w_chg=0.30)))

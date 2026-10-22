@@ -6,11 +6,26 @@ import unittest
 import urllib.error
 from datetime import date
 
-from mortgage_dashboard import (parse_fred_csv, load_series, align, attach_delinquency,
-                                change_over_days, zscore, percentile_rank, spread_stats,
-                                delinquency_trend, market_summary, build_html,
-                                write_aligned_csv, curve_spread, curve_stats, weekly_last,
-                                rate_volatility, rolling_mean)
+from mortgage_dashboard import (
+    SERIES,
+    align,
+    attach_delinquency,
+    build_html,
+    change_over_days,
+    curve_spread,
+    curve_stats,
+    delinquency_trend,
+    load_series,
+    market_summary,
+    parse_fred_csv,
+    percentile_rank,
+    rate_volatility,
+    rolling_mean,
+    spread_stats,
+    weekly_last,
+    write_aligned_csv,
+    zscore,
+)
 
 FIX = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
 
@@ -349,6 +364,27 @@ class TestIOAndReport(unittest.TestCase):
         self.assertEqual(len(got), len(parse_fred_csv(text)))
         self.assertTrue(msgs and "using cache" in msgs[0])
 
+    def test_offline_without_cache_uses_snapshot(self):
+        text = raw("DGS10")
+        os.makedirs(os.path.join(self.tmp, "snapshot"))
+        with open(os.path.join(self.tmp, "snapshot", "DGS10.csv"), "w") as fh:
+            fh.write(text)
+        msgs = []
+        got = load_series("DGS10", self.tmp, offline=True, log=msgs.append)
+        self.assertEqual(got, parse_fred_csv(text))
+        self.assertTrue(msgs and "snapshot" in msgs[0])
+        # an online refresh writes the normal cache and leaves the snapshot untouched
+        load_series("DGS10", self.tmp, fetch=lambda sid: "DATE,DGS10\n2030-01-02,9.99\n")
+        self.assertTrue(os.path.exists(os.path.join(self.tmp, "DGS10.csv")))
+        with open(os.path.join(self.tmp, "snapshot", "DGS10.csv")) as fh:
+            self.assertEqual(fh.read(), text)
+
+    def test_committed_snapshot_covers_every_series(self):
+        snap = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "snapshot")
+        for sid in SERIES:
+            with open(os.path.join(snap, f"{sid}.csv"), newline="") as fh:
+                self.assertTrue(parse_fred_csv(fh.read()))
+
     def test_download_failure_without_cache_raises(self):
         def boom(sid):
             raise urllib.error.URLError("no network")
@@ -412,6 +448,7 @@ class TestIOAndReport(unittest.TestCase):
 class TestCliStaleWarning(unittest.TestCase):
     def test_old_cache_warns_on_stderr_but_still_runs(self):
         import contextlib, io
+
         import cli
         tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, tmp)
@@ -425,13 +462,17 @@ class TestCliStaleWarning(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(tmp, "out", "report.html")))
 
     def test_bad_window_years_is_a_clean_error(self):
-        import contextlib, io, cli
+        import contextlib, io
+
+        import cli
         with contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit):
                 cli.main(["--window-years", "0"])
 
     def test_empty_cached_series_is_a_clean_error(self):
-        import contextlib, io, cli
+        import contextlib, io
+
+        import cli
         tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, tmp)
         for sid in ("MORTGAGE30US", "MORTGAGE15US", "DGS10", "DGS2", "DGS3MO", "DRSFRMACBS"):
@@ -445,7 +486,9 @@ class TestCliStaleWarning(unittest.TestCase):
         self.assertIn("no observations", err.getvalue())
 
     def test_offline_with_old_cache_missing_dgs3mo_gives_clear_error(self):
-        import contextlib, io, cli
+        import contextlib, io
+
+        import cli
         tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, tmp)
         for sid in ("MORTGAGE30US", "MORTGAGE15US", "DGS10", "DGS2", "DRSFRMACBS"):

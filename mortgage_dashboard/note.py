@@ -97,9 +97,9 @@ def read_across(stats, cv, cv3m, dq, wk10):
     out = []
     z5 = stats.get("spread_z_5y")
     if z5 is not None and z5 >= 1:
-        out.append(("FIG", f"Spread {z5:.1f} standard deviations above its 5-year average: originations face wider primary-secondary spreads."))
+        out.append(("FIG", f"Spread {z5:.1f} standard deviations above its 5-year average: mortgage rates sit wide of Treasuries (wider MBS spreads, originator margins, or both)."))
     elif z5 is not None and z5 <= -1:
-        out.append(("FIG", f"Spread {abs(z5):.1f} standard deviations below its 5-year average: originations face tighter primary-secondary spreads."))
+        out.append(("FIG", f"Spread {abs(z5):.1f} standard deviations below its 5-year average: mortgage rates sit tight to Treasuries (tighter MBS spreads, originator margins, or both)."))
     inv = [n for n, c in (("10Y-2Y", cv), ("10Y-3M", cv3m)) if c and c["inverted_now"]]
     if inv:
         out.append(("FIG", f"With the {' and '.join(inv)} curve inverted, funding costs sit above long asset yields: net interest margin faces pressure."))

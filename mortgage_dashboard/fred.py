@@ -63,9 +63,16 @@ def download(series_id, timeout=30, retries=3):
 def load_series(series_id, data_dir="data", offline=False, fetch=download, log=print):
     """Return parsed observations, refreshing the cache unless offline.
 
-    Online failures fall back to a cached file when one exists.
+    Online failures fall back to a cached file when one exists. With no cache, the
+    committed dated snapshot in <data_dir>/snapshot/ is used so a fresh clone runs.
     """
-    path = cache_path(series_id, data_dir)
+    path = read_path = cache_path(series_id, data_dir)
+    if not os.path.exists(path):   # reads only: downloads still write to the cache, never the snapshot
+        snapshot = cache_path(series_id, os.path.join(data_dir, "snapshot"))
+        if os.path.exists(snapshot):
+            read_path = snapshot
+            if offline:
+                log(f"note: no cache for {series_id}; using committed snapshot {snapshot}")
     if not offline:
         try:
             text = fetch(series_id)
@@ -76,12 +83,12 @@ def load_series(series_id, data_dir="data", offline=False, fetch=download, log=p
             os.replace(path + ".tmp", path)
             return data
         except (urllib.error.URLError, OSError, ValueError) as exc:
-            if not os.path.exists(path):
+            if not os.path.exists(read_path):
                 raise RuntimeError(f"could not download {series_id} ({exc}) and no cache at {path}") from exc
-            log(f"warning: download of {series_id} failed ({exc}); using cache {path}")
-    elif not os.path.exists(path):
+            log(f"warning: download of {series_id} failed ({exc}); using cache {read_path}")
+    elif not os.path.exists(read_path):
         raise FileNotFoundError(f"--offline requested but no cached file at {path}; run once without --offline to download it")
-    with open(path, newline="") as fh:
+    with open(read_path, newline="") as fh:
         return parse_fred_csv(fh.read())
 
 

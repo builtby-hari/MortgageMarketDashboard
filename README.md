@@ -14,9 +14,20 @@ writes a self-contained HTML report, a CSV of the aligned data, and a short
 auto-written market summary. Standard library only (Python 3.9+). No API key and no
 `pip install`.
 
+**Why it matters for a rates or mortgage desk.** The mortgage-Treasury spread is the markup borrowers pay over the 10-year,
+so where it sits against history says whether mortgages and MBS look cheap or rich and how much of a Treasury move reaches borrowers.
+
+## At a Glance
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/spread-dark.svg">
+  <img alt="Mortgage-Treasury Spread, Weekly Since 1971, with the Mean and a Plus or Minus One Standard Deviation Band" src="docs/spread.svg" width="100%">
+</picture>
+
+*Mortgage-Treasury spread, weekly since 1971. The shaded band is the mean plus or minus one standard deviation; the dot is the latest week.*
+
 ## Contents
 
-- [Hero Chart](#hero-chart)
 - [Results at a Glance](#results-at-a-glance)
 - [How It Works](#how-it-works)
 - [Quickstart](#quickstart)
@@ -32,18 +43,9 @@ auto-written market summary. Standard library only (Python 3.9+). No API key and
 - [License](#license)
 - [Glossary](#glossary)
 
-## Hero Chart
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/spread-dark.svg">
-  <img alt="Mortgage-Treasury Spread, Weekly Since 1971, with the Mean and a Plus or Minus One Standard Deviation Band" src="docs/spread.svg" width="100%">
-</picture>
-
-*Mortgage-Treasury spread, weekly since 1971. The shaded band is the mean plus or minus one standard deviation; the dot is the latest week.*
-
 ## Results at a Glance
 
-Week of October 15, 2026, from `python3 cli.py --offline` (cache pulled 2026-10-21):
+Week of October 15, 2026, from `python3 cli.py --offline` on the committed snapshot (pulled 2026-10-22):
 
 | Measure | Latest Value |
 |---|---|
@@ -51,8 +53,8 @@ Week of October 15, 2026, from `python3 cli.py --offline` (cache pulled 2026-10-
 | 10-Year Treasury, Weekly Average | 5.19% |
 | Mortgage-Treasury Spread | 222 bp, z = +0.9, 85th percentile of 4 to 535 bp |
 | Spread Average Since 1971 | 176 bp over 2,899 weekly observations |
-| 10-Year Minus 2-Year Treasury | +38 bp, down 16 bp over 52 weeks |
-| Curve Inverted | 16% of 12,592 daily readings since 1976 |
+| 10-Year Minus 2-Year Treasury | +33 bp, down 20 bp over 52 weeks |
+| Curve Inverted | 16% of 12,593 daily readings since 1976 |
 
 ## How It Works
 
@@ -75,12 +77,17 @@ flowchart LR
 ## Quickstart
 
 ```bash
-python3 cli.py                       # download (and cache) data, write out/report.html and out/aligned.csv
-python3 cli.py --offline             # reuse data/*.csv, no network
+git clone https://github.com/builtby-hari/MortgageMarketDashboard.git
+cd MortgageMarketDashboard
+python3 cli.py --offline             # no network: uses data/*.csv, or the committed snapshot on a fresh clone
+python3 cli.py                       # download fresh data from FRED into data/, write out/report.html and out/aligned.csv
 python3 cli.py --window-years 10     # z-score against the trailing 10 years only
 python3 charts.py                    # redraw docs/*.svg and docs/*-dark.svg from data/
 python3 -m unittest discover -v      # tests (no network; uses tests/fixtures)
 ```
+
+A fresh clone works offline straight away: when `data/` has no cached file for a series,
+`--offline` reads the dated snapshot in `data/snapshot/` (see [Data](#project-layout-and-data)).
 
 Open `out/report.html` in a browser. It has inline SVG charts, follows the system
 light/dark setting, and uses no external JS, CSS, fonts or images. A snapshot is in
@@ -126,12 +133,9 @@ light/dark setting, and uses no external JS, CSS, fonts or images. A snapshot is
 <details>
 <summary>Full Output</summary>
 
-The output below was captured before the five-year z-score, last-inverted and 10Y-3M
-clauses were added to the summary (FRED was down for maintenance when they were added,
-so it could not be refreshed); re-run `python3 cli.py` to see them with current data.
-
 ```
-For the week of October 15, 2026, the 30-year fixed mortgage rate was 7.40% (unchanged on the week, up 113 bp over 52 weeks); the 15-year was 6.71%. The 10-year Treasury averaged 5.19% over the same week, so the mortgage-Treasury spread was 222 bp (down 3 bp over 52 weeks). That is 0.9 standard deviations above the average of 176 bp (2,899 weekly observations since 1971), at the 85th percentile of the range 4 to 535 bp. The 10-year minus 2-year Treasury spread was +38 bp (down 16 bp over 52 weeks); the curve was inverted on 16% of 12,592 daily readings since 1976. The single-family mortgage delinquency rate was 1.86% in Q2 2026, down 0.02 pp on the quarter and up 0.08 pp on the year (flat trend), at the 20th percentile of quarterly readings since 1991.
+For the week of October 15, 2026, the 30-year fixed mortgage rate was 7.40% (unchanged on the week, up 113 bp over 52 weeks); the 15-year was 6.71%. The 10-year Treasury averaged 5.19% over the same week, so the mortgage-Treasury spread was 222 bp (down 2 bp over 52 weeks). That is 0.9 standard deviations above the average of 176 bp (2,899 weekly observations since 1971), at the 85th percentile of the range 4 to 535 bp. Against the trailing five years alone it is 0.5 standard deviations below that window's average (the 30th percentile). The 10-year minus 2-year Treasury spread was +33 bp (down 20 bp over 52 weeks); the curve was inverted on 16% of 12,593 daily readings since 1976; it last closed inverted on September 5, 2024. The 10-year minus 3-month Treasury spread was +86 bp (up 84 bp over 52 weeks); the curve was inverted on 11% of 11,283 daily readings since 1981; it last closed inverted on October 16, 2025. The single-family mortgage delinquency rate was 1.86% in Q2 2026, down 0.02 pp on the quarter and up 0.08 pp on the year (flat trend), at the 20th percentile of quarterly readings since 1991.
+10Y yield volatility: 5.0 bp std dev of daily changes over the last 63 days
 
 Aligned weeks: 2,899 (1971-04-02 to 2026-10-15)
 Wrote out/report.html
@@ -163,7 +167,7 @@ the rules below; none of it is written by hand.
 | W1 Largest Moves | always, top three non-zero | the three largest absolute weekly changes among the 30-year rate, 10-year weekly average, spread and both curve slopes |
 | W2 Spread Band | spread z-score is above +1 or below -1 | spread level against its average, in standard deviations |
 | W3 Curve Sign Change | a curve slope has the opposite sign a week or 52 weeks earlier | the old and new slope in bp |
-| R1 Spread vs 5 Years | spread z-score against the trailing five years is +1 or higher (or -1 or lower) | FIG: originations face wider (or tighter) primary-secondary spreads |
+| R1 Spread vs 5 Years | spread z-score against the trailing five years is +1 or higher (or -1 or lower) | FIG: mortgage rates sit wide of (or tight to) Treasuries, through MBS spreads, originator margins, or both |
 | R2 Inverted Curve | 10Y-2Y or 10Y-3M is below zero | FIG: funding costs sit above long asset yields, so net interest margin faces pressure |
 | R3 Upward Curve | both slopes are above zero | FIG: term lending earns a positive carry over short funding |
 | R4 Mortgage Rate Level | 30-year rate moved 25 bp or more over 52 weeks | FIG: refinancing incentive is lower (up) or higher (down) |
@@ -178,7 +182,7 @@ or let `cli.py` download first; it does not fabricate values if a download fails
 
 **Why it matters.** Agency MBS are priced as a spread to Treasuries or swaps, and the
 primary mortgage rate is what borrowers actually pay and what drives refinancing and
-prepayment speeds. The primary-secondary mortgage-Treasury spread widens when rate
+prepayment speeds. The mortgage-Treasury spread widens when rate
 volatility and MBS demand conditions are poor and tightens when they improve, so
 tracking where it sits against history is a basic first check in mortgage valuation
 work. Delinquency trends are the credit-side context. This project is a quick,
@@ -291,7 +295,13 @@ docs/                             README chart SVGs (light and -dark), sample re
 | `DGS3MO` | 3-month Treasury constant maturity yield | daily (business days) |
 | `DRSFRMACBS` | Delinquency rate on single-family residential mortgages, all commercial banks | quarterly |
 
-Downloads are cached in `data/`; `--offline` uses only those cached files.
+Downloads are cached in `data/` (gitignored); `--offline` uses those cached files, falling back to the committed snapshot below when a series has no cache.
+
+**Snapshot.** `data/snapshot/` holds a committed copy of all six series, downloaded from
+FRED on October 22, 2026 (latest observations: PMMS week of October 15, 2026; Treasuries
+October 20, 2026; delinquency Q2 2026). It is used only when `data/` has no cached file for a
+series, so a fresh clone runs `--offline` with no network. A normal online run writes
+`data/*.csv` and never changes the snapshot. Source: FRED, Federal Reserve Bank of St. Louis.
 
 ## License
 

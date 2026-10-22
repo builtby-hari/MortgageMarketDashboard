@@ -49,15 +49,19 @@ def main(argv=None):
     cv3m = curve_stats(curve3m, a.window_years)
     vol = rate_volatility(data["DGS10"])
     label = f"in the trailing {a.window_years:g} years" if a.window_years else None
-    os.makedirs(a.out, exist_ok=True)
     html_path, csv_path = os.path.join(a.out, "report.html"), os.path.join(a.out, "aligned.csv")
-    with open(html_path, "w", encoding="utf-8") as fh:
-        fh.write(build_html(rows, data["DRSFRMACBS"], stats, dq, label, a.chart_years,
-                            generated=date.today().isoformat(), curve=curve, cv=cv, curve3m=curve3m, cv3m=cv3m, vol=vol))
-    write_aligned_csv(csv_path, rows)
-    if a.note:
-        with open(a.note, "w", encoding="utf-8") as fh:
-            fh.write(build_note(rows, stats, cv, cv3m, curve, curve3m, dq))
+    try:
+        os.makedirs(a.out, exist_ok=True)
+        with open(html_path, "w", encoding="utf-8") as fh:
+            fh.write(build_html(rows, data["DRSFRMACBS"], stats, dq, label, a.chart_years,
+                                generated=date.today().isoformat(), curve=curve, cv=cv, curve3m=curve3m, cv3m=cv3m, vol=vol))
+        write_aligned_csv(csv_path, rows)
+        if a.note:
+            with open(a.note, "w", encoding="utf-8") as fh:
+                fh.write(build_note(rows, stats, cv, cv3m, curve, curve3m, dq))
+    except OSError as exc:
+        print(f"error: could not write output ({exc})", file=sys.stderr)
+        return 1
     print(market_summary(stats, dq, label, cv, cv3m))
     if vol is not None:
         print(f"10Y yield volatility: {vol:.1f} bp std dev of daily changes over the last 63 days")
